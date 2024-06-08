@@ -1,32 +1,31 @@
-FROM php:8.2-fpm
-
+FROM php:8.2-fpm AS base
 RUN apt-get update
-
 RUN apt-get update && apt-get install -y --no-install-recommends \
         locales less vim nano micro sudo git zip procps \
         imagemagick libmagickcore-dev libmagickwand-dev \
         curl iputils-ping ca-certificates  gnupg \
         libcurl4-gnutls-dev libpq-dev libfreetype6-dev libjpeg62-turbo-dev libpng-dev libzip-dev libzstd-dev
 
-
 RUN mkdir -p /etc/apt/keyrings
 RUN curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg
 RUN echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_20.x nodistro main" | sudo tee /etc/apt/sources.list.d/nodesource.list
 RUN apt-get update && apt-get install -y nodejs
+ENV PNPM_HOME="/pnpm"
+ENV PATH="$PNPM_HOME:$PATH"
+RUN corepack enable
 
-RUN npm install -g pnpm
 RUN rm -rf /var/lib/apt/lists
 
 ENV PNPM_HOME=/root/.local/share/pnpm
 ENV PATH=$PATH:/root/.local/share/pnpm
 
 # Install uglify and terser
-RUN npm install -g \
-        terser \
-        uglifycss \
-        autoprefixer \
-        postcss \
-        sass
+#RUN npm install -g \
+#        terser \
+#        uglifycss \
+#        autoprefixer \
+#        postcss \
+#        sass
 
 # Install extensions
 RUN docker-php-ext-install -j$(nproc) opcache pdo_pgsql  zip  xml  curl
@@ -77,25 +76,59 @@ COPY src /var/www/src
 COPY app /var/www/app
 COPY var /var/www/var
 
-WORKDIR /var/www/src/
-RUN pnpm install && pnpm run build
-
-RUN sass themes/BaseV1/assets/css/sass/main.scss:themes/BaseV1/assets/css/main.css
-
-RUN chown www-data:www-data -R /var/www
+RUN chown www-data:www-data -R /var/www/config
+RUN chown www-data:www-data -R /var/www/html
+RUN chown www-data:www-data -R /var/www/scripts
+RUN chown www-data:www-data -R /var/www/app
+RUN chown www-data:www-data -R /var/www/src/conf
+RUN chown www-data:www-data -R /var/www/src/core
+RUN chown www-data:www-data -R /var/www/src/modules
+RUN chown www-data:www-data -R /var/www/src/plugins
+RUN chown www-data:www-data -R /var/www/src/themes
+RUN chown www-data:www-data -R /var/www/src/tools
+RUN chown www-data:www-data -R /var/www/src/translations
+RUN chown www-data:www-data -R /var/www/src/*.*
 
 COPY docker/recreate-pending-pcache-cron.sh /recreate-pending-pcache-cron.sh
 COPY docker/jobs-cron.sh /jobs-cron.sh
 COPY docker/entrypoint.sh /entrypoint.sh
-
 COPY version.txt /var/www/version.txt
-
 COPY docker/production/php.ini /usr/local/etc/php/php.ini
-
 COPY docker/timezone.ini /usr/local/etc/php/conf.d/timezone.ini
 
 RUN ln -s /var/www/html /var/www/public
+RUN chmod -R 755 /var/www/public
 
+WORKDIR /var/www
+
+FROM base AS prod-deps
+# Install uglify and terser
+RUN npm install -g \
+        terser \
+        uglifycss \
+        autoprefixer \
+        postcss \
+        sass
+RUN --mount=type=cache,id=pnpm,target=/pnpm/store pnpm install --prod --frozen-lockfile
+RUN pnpm run build
+RUN sass themes/BaseV1/assets/css/sass/main.scss:themes/BaseV1/assets/css/main.css
+WORKDIR /var/www
+
+FROM base AS build
+# Install uglify and terser
+RUN npm install -g \
+        terser \
+        uglifycss \
+        autoprefixer \
+        postcss \
+        sass
+WORKDIR /var/www/src
+RUN --mount=type=cache,id=pnpm,target=/pnpm/store pnpm install --frozen-lockfile
+WORKDIR /var/www
+RUN pnpm run build
+RUN sass themes/BaseV1/assets/css/sass/main.scss:themes/BaseV1/assets/css/main.css
+
+FROM build
 # arquivos exclusivos dos ambientes de desenvolvimento
 COPY docker/development/router.php /var/www/dev/router.php
 COPY docker/development/start.sh /var/www/dev/start.sh
@@ -106,3 +139,4 @@ WORKDIR /var/www
 EXPOSE 9000
 
 CMD ["php-fpm"]
+
