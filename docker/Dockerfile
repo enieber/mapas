@@ -122,11 +122,8 @@ RUN npm install -g \
         autoprefixer \
         postcss \
         sass
-WORKDIR /var/www/src
-RUN --mount=type=cache,id=pnpm,target=/pnpm/store pnpm install --frozen-lockfile
 WORKDIR /var/www
-RUN pnpm run build
-RUN sass themes/BaseV1/assets/css/sass/main.scss:themes/BaseV1/assets/css/main.css
+
 
 FROM build
 # arquivos exclusivos dos ambientes de desenvolvimento
